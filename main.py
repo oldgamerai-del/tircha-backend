@@ -28,7 +28,14 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
-
+@app.get("/")
+async def root():
+    return {
+        "name": "Tircha Backend API",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health"
+    }
 @app.get("/health")
 async def health():
     return {"status": "ok", "site": "tircha.com"}
