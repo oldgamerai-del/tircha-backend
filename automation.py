@@ -21,7 +21,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # Best free models on OpenRouter - openrouter/auto picks the best available
 FREE_MODELS = [
-    "openrouter/auto",                          # primary - always works
+    "qwen/qwen-2.5-7b-instruct:free",                          # primary - always works
     "google/gemma-3-27b-it:free",               # fallback 1
     "meta-llama/llama-3.3-70b-instruct:free",   # fallback 2
     "mistralai/mistral-7b-instruct:free",        # fallback 3
@@ -148,7 +148,7 @@ def extract_faq_from_markdown(content: str) -> list:
             if len(a) > 10:
                 faqs.append({"q": q.strip(), "a": a[:400]})
 
-    return faqs[:5]  # max 5 FAQs
+    return faqs[:5]  #  5 FAQs
 
 
 def inject_affiliate_links(content: str) -> str:
@@ -215,7 +215,7 @@ async def generate_article(keyword: str, niche: str) -> dict | None:
                         "model": model,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.7,
-                        "max_tokens": 2500
+                        "max_tokens": 1500
                     },
                     timeout=aiohttp.ClientTimeout(total=180)
                 ) as resp:
