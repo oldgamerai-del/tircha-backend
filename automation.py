@@ -313,8 +313,8 @@ async def run_batch(articles_per_niche: int = 1):
                 success += 1
         logging.info("")
         if i < len(batch):
-            logging.info("Waiting 15s before next article...")
-            await asyncio.sleep(45)
+            logging.info("Waiting 120s before next article...")
+            await asyncio.sleep(120)
 
     logging.info("=" * 60)
     logging.info(f"COMPLETE: {success}/{len(batch)} articles saved")
