@@ -21,12 +21,8 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # Best free models on OpenRouter - openrouter/auto picks the best available
 FREE_MODELS = [
-    "qwen/qwen-2.5-7b-instruct:free",                          # primary - always works
-    "google/gemma-3-27b-it:free",               # fallback 1
     "meta-llama/llama-3.3-70b-instruct:free",   # fallback 2
-    "mistralai/mistral-7b-instruct:free",        # fallback 3
-    "deepseek/deepseek-r1:free",                 # fallback 4
-]
+ ]
 
 NICHES = {
     "trading": [
@@ -215,7 +211,7 @@ async def generate_article(keyword: str, niche: str) -> dict | None:
                         "model": model,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.7,
-                        "max_tokens": 1500
+                        "max_tokens": 800
                     },
                     timeout=aiohttp.ClientTimeout(total=180)
                 ) as resp:
@@ -290,7 +286,7 @@ def save_article(article: dict) -> bool:
     return True
 
 
-async def run_batch(articles_per_niche: int = 2):
+async def run_batch(articles_per_niche: int = 1):
     logging.info("=" * 60)
     logging.info("Tircha AI Article Generator")
     logging.info(f"Blog folder: {BLOG_DIR}")
@@ -321,7 +317,7 @@ async def run_batch(articles_per_niche: int = 2):
         logging.info("")
         if i < len(batch):
             logging.info("Waiting 15s before next article...")
-            await asyncio.sleep(15)
+            await asyncio.sleep(45)
 
     logging.info("=" * 60)
     logging.info(f"COMPLETE: {success}/{len(batch)} articles saved")
