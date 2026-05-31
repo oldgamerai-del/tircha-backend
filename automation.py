@@ -14,7 +14,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 PROJECT_DIR = os.path.dirname(BASE_DIR)
-BLOG_DIR = os.path.join(PROJECT_DIR, "frontend", "content", "blog")
+BLOG_DIR = os.path.join(PROJECT_DIR, "content", "blog")
 os.makedirs(BLOG_DIR, exist_ok=True)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
