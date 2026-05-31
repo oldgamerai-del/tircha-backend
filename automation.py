@@ -194,84 +194,81 @@ async def generate_article(keyword: str, niche: str) -> dict | None:
     prompt = build_prompt(keyword, niche)
     logging.info(f"Generating: {keyword}")
 
-    async with aiohttp.ClientSession() as session:
-        for model in FREE_MODELS:
-            try:
-                logging.info(f"  Trying model: {model}")
+async with aiohttp.ClientSession() as session:
+    # On free tier: retry same model up to 5 times with long waits
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            logging.info(f"  Attempt {attempt + 1}/{max_retries}")
+            async with session.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://tircha.com",
+                    "X-Title": "Tircha AI Writer"
+                },
+                json={
+                    "model": "meta-llama/llama-3.1-8b-instruct:free",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.7,
+                    "max_tokens": 800
+                },
+                timeout=aiohttp.ClientTimeout(total=120)
+            ) as resp:
+                logging.info(f"  Status: {resp.status}")
 
-                async with session.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://tircha.com",
-                        "X-Title": "Tircha AI Writer"
-                    },
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.7,
-                        "max_tokens": 800
-                    },
-                    timeout=aiohttp.ClientTimeout(total=180)
-                ) as resp:
+                if resp.status == 429:
+                    wait = 90 * (attempt + 1)  # 90s, 180s, 270s...
+                    logging.warning(f"  Rate limited. Waiting {wait}s...")
+                    await asyncio.sleep(wait)
+                    continue
 
-                    logging.info(f"  Status: {resp.status}")
+                if resp.status != 200:
+                    err = await resp.text()
+                    logging.error(f"  Error {resp.status}: {err[:200]}")
+                    break
 
-                    if resp.status == 429:
-                        logging.warning("  Rate limited, waiting 20s...")
-                        await asyncio.sleep(20)
-                        continue
+                data = await resp.json()
+                content = data["choices"][0]["message"]["content"].strip()
 
-                    if resp.status != 200:
-                        err = await resp.text()
-                        logging.error(f"  Error {resp.status}: {err[:200]}")
-                        continue
+                if len(content) < 400:
+                    logging.warning(f"  Content too short")
+                    continue
 
-                    data = await resp.json()
-                    content = data["choices"][0]["message"]["content"].strip()
+                model_used = data.get("model", "llama")
+                content = inject_affiliate_links(content)
+                title = extract_title_from_markdown(content, keyword)
+                faqs = extract_faq_from_markdown(content)
+                slug = slugify(keyword)
 
-                    if len(content) < 600:
-                        logging.warning(f"  Content too short ({len(content)} chars)")
-                        continue
+                article = {
+                    "title": title,
+                    "meta_description": f"Expert guide: {keyword}. Reviews and recommendations for 2026."[:160],
+                    "slug": slug,
+                    "content_markdown": content,
+                    "faq": faqs,
+                    "keyword": keyword,
+                    "niche": niche,
+                    "model_used": model_used,
+                    "word_count": len(content.split()),
+                    "generated_at": datetime.now(timezone.utc).isoformat()
+                }
 
-                    # Log which model actually responded
-                    model_used = data.get("model", model)
-                    logging.info(f"  Model used: {model_used}")
+                logging.info(f"  SUCCESS: '{title}' ({len(content.split())} words)")
+                return article
 
-                    # Process content
-                    content = inject_affiliate_links(content)
-                    title = extract_title_from_markdown(content, keyword)
-                    faqs = extract_faq_from_markdown(content)
-                    slug = slugify(keyword)
-                    meta = f"Complete expert guide about {keyword}. Reviews, comparisons and recommendations for 2026."
+        except asyncio.TimeoutError:
+            logging.error(f"  Timeout on attempt {attempt + 1}")
+            await asyncio.sleep(30)
+        except Exception as e:
+            logging.error(f"  Exception: {e}")
+            await asyncio.sleep(10)
 
-                    article = {
-                        "title": title,
-                        "meta_description": meta[:160],
-                        "slug": slug,
-                        "content_markdown": content,
-                        "faq": faqs,
-                        "keyword": keyword,
-                        "niche": niche,
-                        "model_used": model_used,
-                        "word_count": len(content.split()),
-                        "generated_at": datetime.now(timezone.utc).isoformat()
-                    }
 
-                    logging.info(f"  SUCCESS: '{title}' ({len(content.split())} words, {len(faqs)} FAQs)")
-                    return article
 
-            except asyncio.TimeoutError:
-                logging.error(f"  Timeout with {model}")
-            except Exception as e:
-                logging.error(f"  Exception: {e}")
-
-            await asyncio.sleep(5)
-
-    logging.error(f"FAILED all models for: {keyword}")
-    return None
-
+        logging.error(f"FAILED after {max_retries} attempts: {keyword}")
+        return None
 
 def save_article(article: dict) -> bool:
     slug = article.get("slug", "")
