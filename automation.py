@@ -19,10 +19,7 @@ os.makedirs(BLOG_DIR, exist_ok=True)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-# Best free models on OpenRouter - openrouter/auto picks the best available
-FREE_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",   # fallback 2
- ]
+MODEL = "meta-llama/llama-3.1-8b-instruct:free"
 
 NICHES = {
     "trading": [
@@ -32,9 +29,9 @@ NICHES = {
         "best forex broker for beginners 2026",
         "copy trading platforms review 2026",
         "best crypto trading bots 2026",
-        "algorithmic trading software for beginners",
-        "best stock screener tools 2026",
         "eToro review 2026 is it safe",
+        "best stock screener tools 2026",
+        "algorithmic trading software for beginners",
         "best paper trading platforms free",
     ],
     "ai-tools": [
@@ -98,61 +95,42 @@ def slugify(text: str) -> str:
 
 
 def extract_title_from_markdown(content: str, fallback: str) -> str:
-    """Pull H1 title from generated markdown if present"""
     match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
     if match:
         return match.group(1).strip()
-    # Try first line if no H1
-    first_line = content.strip().split('\n')[0]
-    if len(first_line) > 10 and not first_line.startswith('This post'):
-        return first_line.replace('#', '').strip()
+    lines = content.strip().split('\n')
+    for line in lines[:5]:
+        clean = line.replace('#', '').strip()
+        if len(clean) > 15 and not clean.startswith('*'):
+            return clean
     return fallback.title()
 
 
 def extract_faq_from_markdown(content: str) -> list:
-    """Extract FAQ questions and answers from markdown"""
     faqs = []
-    # Find FAQ section
     faq_match = re.search(
         r'#{1,3}\s*(?:FAQ|Frequently Asked Questions?)(.*?)(?=#{1,3}|\Z)',
         content, re.IGNORECASE | re.DOTALL
     )
     if not faq_match:
         return faqs
-
     faq_text = faq_match.group(1)
-
-    # Pattern 1: ### Question / Answer
-    pattern1 = re.findall(
+    pattern = re.findall(
         r'#{2,4}\s*(.+?)\n(.*?)(?=#{2,4}|\Z)',
         faq_text, re.DOTALL
     )
-    for q, a in pattern1:
+    for q, a in pattern:
         q = q.strip()
         a = re.sub(r'\s+', ' ', a.strip())
         if len(q) > 5 and len(a) > 10:
             faqs.append({"q": q, "a": a[:400]})
-
-    # Pattern 2: **Question?** / Answer
-    if not faqs:
-        pattern2 = re.findall(
-            r'\*\*(.+?\?)\*\*\s*\n+(.+?)(?=\*\*|\Z)',
-            faq_text, re.DOTALL
-        )
-        for q, a in pattern2:
-            a = re.sub(r'\s+', ' ', a.strip())
-            if len(a) > 10:
-                faqs.append({"q": q.strip(), "a": a[:400]})
-
-    return faqs[:5]  #  5 FAQs
+    return faqs[:5]
 
 
 def inject_affiliate_links(content: str) -> str:
-    """Inject affiliate links on first mention of each product"""
     for product, link in AFFILIATE_LINKS.items():
         if not link:
             continue
-        # Only inject if product mentioned but not already linked
         if product.lower() not in content.lower():
             continue
         if f"]({link})" in content:
@@ -168,122 +146,115 @@ def build_prompt(keyword: str, niche: str) -> str:
 Write a detailed, helpful article about: "{keyword}"
 
 REQUIREMENTS:
-- 1000 to 1400 words
-- Natural human tone, not robotic
+- 800 to 1000 words
+- Natural human tone
 - SEO optimized with keyword in first paragraph
-- Use H2 and H3 markdown headings
-- Include a comparison table if comparing products
-- End with a FAQ section with exactly 4 questions
+- Use ## H2 and ### H3 markdown headings
+- End with a ## FAQ section with exactly 3 questions and answers
 - Niche: {niche}
 
-FORMAT:
-- Plain markdown only
-- No code blocks wrapping the article
-- No JSON
-- Start the article with this exact line:
-  *This post contains affiliate links. We may earn a commission at no extra cost to you.*
+Start the article with this exact line:
+*This post contains affiliate links. We may earn a commission at no extra cost to you.*
 
-Write the full article now:"""
+Write the full article now in plain markdown:"""
 
-
-async def generate_article(keyword: str, niche: str) -> dict | None:
-    if not OPENROUTER_API_KEY:
-        logging.error("OPENROUTER_API_KEY missing in .env")
-        return None
-
-    prompt = build_prompt(keyword, niche)
-    logging.info(f"Generating: {keyword}")
-
-async with aiohttp.ClientSession() as session:
-    # On free tier: retry same model up to 5 times with long waits
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            logging.info(f"  Attempt {attempt + 1}/{max_retries}")
-            async with session.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://tircha.com",
-                    "X-Title": "Tircha AI Writer"
-                },
-                json={
-                    "model": "meta-llama/llama-3.1-8b-instruct:free",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7,
-                    "max_tokens": 800
-                },
-                timeout=aiohttp.ClientTimeout(total=120)
-            ) as resp:
-                logging.info(f"  Status: {resp.status}")
-
-                if resp.status == 429:
-                    wait = 90 * (attempt + 1)  # 90s, 180s, 270s...
-                    logging.warning(f"  Rate limited. Waiting {wait}s...")
-                    await asyncio.sleep(wait)
-                    continue
-
-                if resp.status != 200:
-                    err = await resp.text()
-                    logging.error(f"  Error {resp.status}: {err[:200]}")
-                    break
-
-                data = await resp.json()
-                content = data["choices"][0]["message"]["content"].strip()
-
-                if len(content) < 400:
-                    logging.warning(f"  Content too short")
-                    continue
-
-                model_used = data.get("model", "llama")
-                content = inject_affiliate_links(content)
-                title = extract_title_from_markdown(content, keyword)
-                faqs = extract_faq_from_markdown(content)
-                slug = slugify(keyword)
-
-                article = {
-                    "title": title,
-                    "meta_description": f"Expert guide: {keyword}. Reviews and recommendations for 2026."[:160],
-                    "slug": slug,
-                    "content_markdown": content,
-                    "faq": faqs,
-                    "keyword": keyword,
-                    "niche": niche,
-                    "model_used": model_used,
-                    "word_count": len(content.split()),
-                    "generated_at": datetime.now(timezone.utc).isoformat()
-                }
-
-                logging.info(f"  SUCCESS: '{title}' ({len(content.split())} words)")
-                return article
-
-        except asyncio.TimeoutError:
-            logging.error(f"  Timeout on attempt {attempt + 1}")
-            await asyncio.sleep(30)
-        except Exception as e:
-            logging.error(f"  Exception: {e}")
-            await asyncio.sleep(10)
-
-
-
-        logging.error(f"FAILED after {max_retries} attempts: {keyword}")
-        return None
 
 def save_article(article: dict) -> bool:
     slug = article.get("slug", "")
     if not slug:
         return False
-
     filepath = os.path.join(BLOG_DIR, f"{slug}.json")
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(article, f, indent=2, ensure_ascii=False)
-
     logging.info(f"  SAVED: {filepath}")
     return True
 
 
-async def run_batch(articles_per_niche: int = 1):
+async def generate_article(keyword: str, niche: str):
+    if not OPENROUTER_API_KEY:
+        logging.error("OPENROUTER_API_KEY missing")
+        return None
+
+    prompt = build_prompt(keyword, niche)
+    logging.info(f"Generating: {keyword}")
+
+    async with aiohttp.ClientSession() as session:
+        for attempt in range(6):
+            try:
+                logging.info(f"  Attempt {attempt + 1}/6")
+
+                async with session.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://tircha.com",
+                        "X-Title": "Tircha AI Writer"
+                    },
+                    json={
+                        "model": MODEL,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7,
+                        "max_tokens": 800
+                    },
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
+                    logging.info(f"  Status: {resp.status}")
+
+                    if resp.status == 429:
+                        wait = 90 * (attempt + 1)
+                        logging.warning(f"  Rate limited. Waiting {wait}s then retrying...")
+                        await asyncio.sleep(wait)
+                        continue
+
+                    if resp.status != 200:
+                        err = await resp.text()
+                        logging.error(f"  Error {resp.status}: {err[:200]}")
+                        await asyncio.sleep(10)
+                        continue
+
+                    data = await resp.json()
+                    content = data["choices"][0]["message"]["content"].strip()
+
+                    if len(content) < 300:
+                        logging.warning(f"  Content too short ({len(content)} chars), retrying...")
+                        await asyncio.sleep(30)
+                        continue
+
+                    model_used = data.get("model", MODEL)
+                    content = inject_affiliate_links(content)
+                    title = extract_title_from_markdown(content, keyword)
+                    faqs = extract_faq_from_markdown(content)
+                    slug = slugify(keyword)
+
+                    article = {
+                        "title": title,
+                        "meta_description": f"Expert guide: {keyword}. Reviews and recommendations for 2026."[:160],
+                        "slug": slug,
+                        "content_markdown": content,
+                        "faq": faqs,
+                        "keyword": keyword,
+                        "niche": niche,
+                        "model_used": model_used,
+                        "word_count": len(content.split()),
+                        "generated_at": datetime.now(timezone.utc).isoformat()
+                    }
+
+                    logging.info(f"  SUCCESS: '{title}' ({len(content.split())} words)")
+                    return article
+
+            except asyncio.TimeoutError:
+                logging.error(f"  Timeout on attempt {attempt + 1}")
+                await asyncio.sleep(30)
+            except Exception as e:
+                logging.error(f"  Exception: {e}")
+                await asyncio.sleep(10)
+
+    logging.error(f"FAILED after 6 attempts: {keyword}")
+    return None
+
+
+async def run_batch():
     logging.info("=" * 60)
     logging.info("Tircha AI Article Generator")
     logging.info(f"Blog folder: {BLOG_DIR}")
@@ -294,14 +265,13 @@ async def run_batch(articles_per_niche: int = 1):
         logging.error("Add OPENROUTER_API_KEY to your .env file")
         return
 
-    # Build batch - pick N keywords per niche
+    # 1 article per niche = 4 total per run
     batch = []
     for niche, keywords in NICHES.items():
-        picks = random.sample(keywords, min(articles_per_niche, len(keywords)))
-        for kw in picks:
-            batch.append((kw, niche))
+        pick = random.choice(keywords)
+        batch.append((pick, niche))
 
-    logging.info(f"Batch size: {len(batch)} articles")
+    logging.info(f"Batch: {len(batch)} articles")
     logging.info("")
 
     success = 0
@@ -313,21 +283,18 @@ async def run_batch(articles_per_niche: int = 1):
                 success += 1
         logging.info("")
         if i < len(batch):
-            logging.info("Waiting 120s before next article...")
-            await asyncio.sleep(120)
+            logging.info("Waiting 30s before next article...")
+            await asyncio.sleep(30)
 
     logging.info("=" * 60)
     logging.info(f"COMPLETE: {success}/{len(batch)} articles saved")
     logging.info(f"Folder: {BLOG_DIR}")
     logging.info("=" * 60)
 
-    # List saved files
     if os.path.exists(BLOG_DIR):
         files = [f for f in os.listdir(BLOG_DIR) if f.endswith('.json')]
         logging.info(f"Total articles in blog folder: {len(files)}")
-        for f in sorted(files)[-5:]:  # show last 5
-            logging.info(f"  {f}")
 
 
 if __name__ == "__main__":
-    asyncio.run(run_batch(articles_per_niche=2))
+    asyncio.run(run_batch())
