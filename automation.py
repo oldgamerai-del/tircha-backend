@@ -146,7 +146,8 @@ def build_prompt(keyword: str, niche: str) -> str:
 Write a detailed, helpful article about: "{keyword}"
 
 REQUIREMENTS:
-- 800 to 1000 words
+- Write at least 600 words minimum. Do not stop early.
+- Keep writing until you have covered all sections fully.
 - Natural human tone
 - SEO optimized with keyword in first paragraph
 - Use ## H2 and ### H3 markdown headings
@@ -195,7 +196,7 @@ async def generate_article(keyword: str, niche: str):
                         "model": MODEL,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.7,
-                        "max_tokens": 800
+                        "max_tokens": 1500
                     },
                     timeout=aiohttp.ClientTimeout(total=120)
                 ) as resp:
@@ -216,7 +217,7 @@ async def generate_article(keyword: str, niche: str):
                     data = await resp.json()
                     content = data["choices"][0]["message"]["content"].strip()
 
-                    if len(content) < 300:
+                    if len(content) < 500:
                         logging.warning(f"  Content too short ({len(content)} chars), retrying...")
                         await asyncio.sleep(30)
                         continue
