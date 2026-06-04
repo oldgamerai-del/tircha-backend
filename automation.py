@@ -19,7 +19,7 @@ os.makedirs(BLOG_DIR, exist_ok=True)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-MODEL = "meta-llama/llama-3.1-8b-instruct"
+MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
 NICHES = {
     "trading": [
