@@ -19,7 +19,11 @@ os.makedirs(BLOG_DIR, exist_ok=True)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+FREE_MODELS = [
+    "meta-llama/llama-4-maverick",      # 1M context, best for long writing
+     "nvidia/nemotron-3-ultra:free",          # 1M context, very capable
+]
+MODEL_INDEX = 0  # rotates on each run
 
 NICHES = {
     "trading": [
