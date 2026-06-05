@@ -182,7 +182,10 @@ async def generate_article(keyword: str, niche: str):
 
     prompt = build_prompt(keyword, niche)
     logging.info(f"Generating: {keyword}")
-
+    # Rotate models across articles for better rate limit handling
+    import time
+    model_to_use = FREE_MODELS[int(time.time()) % len(FREE_MODELS)]
+    logging.info(f"  Using model: {model_to_use}")
     async with aiohttp.ClientSession() as session:
         for attempt in range(6):
             try:
@@ -197,7 +200,7 @@ async def generate_article(keyword: str, niche: str):
                         "X-Title": "Tircha AI Writer"
                     },
                     json={
-                        "model": MODEL,
+                        "model": model_to_use,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.7,
                         "max_tokens": 1500
@@ -218,10 +221,25 @@ async def generate_article(keyword: str, niche: str):
                         await asyncio.sleep(10)
                         continue
 
-                    data = await resp.json()
-                    content = data["choices"][0]["message"]["content"].strip()
+                        data = await resp.json()
+                        
+                        # Handle models that return None content (reasoning models)
+                        msg = data["choices"][0]["message"]
+                        content = msg.get("content") or msg.get("reasoning_content") or ""
+                        
+                        # Some reasoning models wrap in <think> tags - extract actual content
+                        if "<think>" in content:
+                            # Remove thinking section, keep only the actual answer
+                            content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
+                        
+                        if not content:
+                            logging.warning("  Empty content returned, retrying...")
+                            await asyncio.sleep(10)
+                            continue
+                        
+                        content = content.strip()
 
-                    if len(content) < 500:
+                    if len(content) < 200:
                         logging.warning(f"  Content too short ({len(content)} chars), retrying...")
                         await asyncio.sleep(30)
                         continue
