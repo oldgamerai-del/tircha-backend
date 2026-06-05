@@ -20,8 +20,13 @@ os.makedirs(BLOG_DIR, exist_ok=True)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 FREE_MODELS = [
-    "meta-llama/llama-4-maverick",      # 1M context, best for long writing
-     "nvidia/nemotron-3-ultra:free",          # 1M context, very capable
+    "openrouter/owl-alpha",                      # Best - 1M context, always free
+    "openai/gpt-oss-120b:free",                  # OpenAI quality, free
+    "google/gemma-4-31b-it:free",                # Google Gemma 4, reliable
+    "nvidia/nemotron-3-super-120b-a12b:free",    # Nvidia 1M context
+    "z-ai/glm-4.5-air:free",                     # Fast fallback
+    "openai/gpt-oss-20b:free",                   # Lightweight fallback
+    "google/gemma-4-26b-a4b-it:free",            # Final fallback
 ]
 MODEL_INDEX = 0  # rotates on each run
 
@@ -186,96 +191,101 @@ async def generate_article(keyword: str, niche: str):
     import time
     model_to_use = FREE_MODELS[int(time.time()) % len(FREE_MODELS)]
     logging.info(f"  Using model: {model_to_use}")
-    async with aiohttp.ClientSession() as session:
-        for attempt in range(6):
-            try:
-                logging.info(f"  Attempt {attempt + 1}/6")
+async with aiohttp.ClientSession() as session:
+    for attempt in range(len(FREE_MODELS)):
+        model = FREE_MODELS[attempt % len(FREE_MODELS)]
+        try:
+            logging.info(f"  Attempt {attempt + 1} using: {model}")
 
-                async with session.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://tircha.com",
-                        "X-Title": "Tircha AI Writer"
-                    },
-                    json={
-                        "model": model_to_use,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.7,
-                        "max_tokens": 1500
-                    },
-                    timeout=aiohttp.ClientTimeout(total=120)
-                ) as resp:
-                    logging.info(f"  Status: {resp.status}")
+            async with session.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://tircha.com",
+                    "X-Title": "Tircha AI Writer"
+                },
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.7,
+                    "max_tokens": 1500
+                },
+                timeout=aiohttp.ClientTimeout(total=120)
+            ) as resp:
+                logging.info(f"  Status: {resp.status}")
 
-                    if resp.status == 429:
-                        wait = 90 * (attempt + 1)
-                        logging.warning(f"  Rate limited. Waiting {wait}s then retrying...")
-                        await asyncio.sleep(wait)
-                        continue
+                if resp.status == 429:
+                    logging.warning(f"  Rate limited on {model}, trying next...")
+                    await asyncio.sleep(15)
+                    continue
 
-                    if resp.status != 200:
-                        err = await resp.text()
-                        logging.error(f"  Error {resp.status}: {err[:200]}")
-                        await asyncio.sleep(10)
-                        continue
+                if resp.status == 404:
+                    logging.error(f"  Model {model} not found, trying next...")
+                    continue
 
-                        data = await resp.json()
-                        
-                        # Handle models that return None content (reasoning models)
-                        msg = data["choices"][0]["message"]
-                        content = msg.get("content") or msg.get("reasoning_content") or ""
-                        
-                        # Some reasoning models wrap in <think> tags - extract actual content
-                        if "<think>" in content:
-                            # Remove thinking section, keep only the actual answer
-                            content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
-                        
-                        if not content:
-                            logging.warning("  Empty content returned, retrying...")
-                            await asyncio.sleep(10)
-                            continue
-                        
-                        content = content.strip()
+                if resp.status != 200:
+                    err = await resp.text()
+                    logging.error(f"  Error {resp.status}: {err[:200]}")
+                    await asyncio.sleep(10)
+                    continue
 
-                    if len(content) < 200:
-                        logging.warning(f"  Content too short ({len(content)} chars), retrying...")
-                        await asyncio.sleep(30)
-                        continue
+                data = await resp.json()
 
-                    model_used = data.get("model", MODEL)
-                    content = inject_affiliate_links(content)
-                    title = extract_title_from_markdown(content, keyword)
-                    faqs = extract_faq_from_markdown(content)
-                    slug = slugify(keyword)
+                # Handle all response formats including reasoning models
+                msg = data["choices"][0]["message"]
 
-                    article = {
-                        "title": title,
-                        "meta_description": f"Expert guide: {keyword}. Reviews and recommendations for 2026."[:160],
-                        "slug": slug,
-                        "content_markdown": content,
-                        "faq": faqs,
-                        "keyword": keyword,
-                        "niche": niche,
-                        "model_used": model_used,
-                        "word_count": len(content.split()),
-                        "generated_at": datetime.now(timezone.utc).isoformat()
-                    }
+                # Try all possible content fields
+                content = (
+                    msg.get("content") or
+                    msg.get("reasoning_content") or
+                    msg.get("reasoning") or
+                    ""
+                )
 
-                    logging.info(f"  SUCCESS: '{title}' ({len(content.split())} words)")
-                    return article
+                # Remove thinking tags that some models add
+                if content and "<think>" in content:
+                    # Keep content after thinking section
+                    after_think = re.sub(r'<think>[\s\S]*?</think>', '', content)
+                    content = after_think.strip() if after_think.strip() else content
 
-            except asyncio.TimeoutError:
-                logging.error(f"  Timeout on attempt {attempt + 1}")
-                await asyncio.sleep(30)
-            except Exception as e:
-                logging.error(f"  Exception: {e}")
-                await asyncio.sleep(10)
+                if not content or len(content) < 200:
+                    logging.warning(f"  Content too short or empty ({len(content) if content else 0} chars)")
+                    await asyncio.sleep(10)
+                    continue
 
-    logging.error(f"FAILED after 6 attempts: {keyword}")
-    return None
+                content = content.strip()
+                model_used = data.get("model", model)
+                content = inject_affiliate_links(content)
+                title = extract_title_from_markdown(content, keyword)
+                faqs = extract_faq_from_markdown(content)
+                slug = slugify(keyword)
 
+                article = {
+                    "title": title,
+                    "meta_description": f"Expert guide: {keyword}. Reviews and recommendations for 2026."[:160],
+                    "slug": slug,
+                    "content_markdown": content,
+                    "faq": faqs,
+                    "keyword": keyword,
+                    "niche": niche,
+                    "model_used": model_used,
+                    "word_count": len(content.split()),
+                    "generated_at": datetime.now(timezone.utc).isoformat()
+                }
+
+                logging.info(f"  SUCCESS via {model_used}: '{title}' ({len(content.split())} words)")
+                return article
+
+        except asyncio.TimeoutError:
+            logging.error(f"  Timeout with {model}")
+            await asyncio.sleep(15)
+        except Exception as e:
+            logging.error(f"  Exception with {model}: {e}")
+            await asyncio.sleep(10)
+
+logging.error(f"FAILED all models for: {keyword}")
+return None
 
 async def run_batch():
     logging.info("=" * 60)
