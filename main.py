@@ -46,3 +46,8 @@ async def get_keywords(niche: str):
     api_key = os.getenv("OPENROUTER_API_KEY")  # reads from .env safely
     # ... keyword logic here
     return {"niche": niche, "keywords": []}
+
+from api_routes import app as api_app
+
+# Mount the SaaS API
+app.mount("/", api_app)
