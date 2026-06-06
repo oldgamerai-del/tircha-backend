@@ -157,10 +157,14 @@ Write a detailed, helpful article about: "{keyword}"
 REQUIREMENTS:
 - Write at least 600 words minimum. Do not stop early.
 - Keep writing until you have covered all sections fully.
-- Natural human tone
+- Natural human tone, conversational and easy to read
 - SEO optimized with keyword in first paragraph
-- Use ## H2 and ### H3 markdown headings
-- End with a ## FAQ section with exactly 3 questions and answers
+- Use ## for section headings (H2) and ### for subsections (H3)
+- Keep headings SHORT — maximum 6 words each
+- Headings should be descriptive but concise, not full sentences
+- Good heading example: "## Key Features to Consider"
+- Bad heading example: "## Here Are The Most Important Features You Should Look For"
+- End with a ## FAQ section with exactly 3 short questions and answers
 - Niche: {niche}
 
 Start the article with this exact line:
