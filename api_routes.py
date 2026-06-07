@@ -321,56 +321,78 @@ async def keyword_research(
     }
 
 
-# ─── Lemon Squeezy Webhook ─────────────────────────────────
-@app.post("/webhooks/lemonsqueezy")
-async def lemonsqueezy_webhook(request: Request):
+# ─── Razorpay Webhook ─────────────────────────────────
+@app.post("/webhooks/razorpay")
+async def razorpay_webhook(request: Request):
     """
-    Auto-creates API keys when someone subscribes.
-    Auto-disables when they cancel.
+    Razorpay sends events here for subscription changes.
+    Auto-creates API keys on payment, disables on cancellation.
     """
-    # Verify the webhook is really from Lemon Squeezy
-    secret = os.getenv("LEMONSQUEEZY_WEBHOOK_SECRET", "")
-    signature = request.headers.get("X-Signature", "")
     body = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    secret = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 
+    # Verify webhook is genuinely from Razorpay
     if secret:
-        expected = hmac.new(
+        import hmac as hmac_lib
+        expected = hmac_lib.new(
             secret.encode(),
             body,
             hashlib.sha256
         ).hexdigest()
-        if not hmac.compare_digest(expected, signature):
-            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        if not hmac_lib.compare_digest(expected, signature):
+            raise HTTPException(status_code=401, detail="Invalid signature")
 
     data = json.loads(body)
-    event = data.get("meta", {}).get("event_name", "")
-    attrs = data.get("data", {}).get("attributes", {})
-    email = attrs.get("user_email", "")
-    product_name = attrs.get("product_name", "").lower()
+    event = data.get("event", "")
+    payload = data.get("payload", {})
 
-    plan = "agency" if "agency" in product_name else "pro" if "pro" in product_name else "starter"
+    # Get subscription and customer details
+    subscription = payload.get("subscription", {}).get("entity", {})
+    email = subscription.get("email", "")
+
+    # Map Razorpay plan IDs to your plan names
+    # Get these plan IDs from Razorpay Dashboard → Subscriptions → Plans
+    plan_id = subscription.get("plan_id", "")
+    PLAN_MAP = {
+        os.getenv("RAZORPAY_STARTER_PLAN_ID", ""): "starter",
+        os.getenv("RAZORPAY_PRO_PLAN_ID", ""):     "pro",
+        os.getenv("RAZORPAY_AGENCY_PLAN_ID", ""):  "agency",
+    }
+    plan = PLAN_MAP.get(plan_id, "starter")
 
     conn = sqlite3.connect(DB_PATH)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    if event in ("subscription_created", "subscription_resumed"):
-        # Generate secure API key
-        api_key = "tircha_" + secrets.token_hex(24)
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        conn.execute("""
-            INSERT OR REPLACE INTO api_keys
-            (api_key, email, plan, status, last_reset)
-            VALUES (?, ?, ?, 'active', ?)
-        """, (api_key, email, plan, today))
+    if event in ("subscription.activated", "subscription.charged"):
+        # Check if key already exists for this email
+        existing = conn.execute(
+            "SELECT api_key FROM api_keys WHERE email = ?", (email,)
+        ).fetchone()
+
+        if existing:
+            # Reactivate existing key
+            conn.execute(
+                "UPDATE api_keys SET status = 'active', plan = ? WHERE email = ?",
+                (plan, email)
+            )
+            api_key = existing[0]
+        else:
+            # Create new API key
+            api_key = "tircha_" + secrets.token_hex(24)
+            conn.execute("""
+                INSERT INTO api_keys (api_key, email, plan, status, last_reset)
+                VALUES (?, ?, ?, 'active', ?)
+            """, (api_key, email, plan, today))
+
         conn.commit()
         conn.close()
-        print(f"NEW SUBSCRIBER: {email} → {plan} → key: {api_key}")
-        # TODO: Send email with API key to customer
-        # Use Mailgun/Resend to email them their key
+        print(f"ACTIVE: {email} → {plan} → {api_key}")
+        # TODO: Email the API key to the customer using Mailgun
 
-    elif event in ("subscription_cancelled", "subscription_expired"):
+    elif event in ("subscription.cancelled", "subscription.completed", "subscription.halted"):
         conn.execute(
-            "UPDATE api_keys SET status = 'inactive' WHERE email = ?",
-            (email,)
+            "UPDATE api_keys SET status = 'inactive' WHERE email = ?", (email,)
         )
         conn.commit()
         conn.close()
