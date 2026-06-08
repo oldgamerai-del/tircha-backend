@@ -4,28 +4,13 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
 import logging
-import sys
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-print("MAIN.PY STARTING", flush=True)
-logger.info("MAIN.PY STARTING")
-
-# Test imports step by step
-print("About to import api_routes", flush=True)
-try:
-    import api_routes
-    print("api_routes imported successfully", flush=True)
-    logger.info("api_routes imported successfully")
-except Exception as e:
-    print(f"ERROR importing api_routes: {e}", flush=True)
-    logger.error(f"ERROR importing api_routes: {e}", exc_info=True)
-    raise
-
-router = api_routes.router
-init_db = api_routes.init_db
+from api_routes import router as api_router
+from api_routes import init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,18 +52,5 @@ async def root():
 async def health():
     return {"status": "ok", "site": "tircha.com"}
 
-@app.get("/debug/routes")
-async def debug_routes():
-    routes = []
-    for route in app.routes:
-        route_info = {
-            "path": route.path,
-            "methods": list(route.methods) if hasattr(route, "methods") else []
-        }
-        routes.append(route_info)
-    return {"total": len(routes), "routes": routes}
-
-print(f"About to include router with {len(router.routes)} routes", flush=True)
-app.include_router(router)
-print(f"Router included. Total app routes now: {len(app.routes)}", flush=True)
-logger.info(f"Router included. Total app routes: {len(app.routes)}")
+# Include router with /api prefix so routes become /api/blog/generate, /api/keywords/research, etc.
+app.include_router(api_router, prefix="/api")
