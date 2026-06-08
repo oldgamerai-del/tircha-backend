@@ -52,4 +52,8 @@ async def root():
 async def health():
     return {"status": "ok", "site": "tircha.com"}
 
+@app.get("/debug/routes")
+async def debug_routes():
+    return {"routes": [route.path for route in app.routes]}
+
 app.include_router(api_router)
