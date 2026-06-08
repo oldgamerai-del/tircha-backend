@@ -9,22 +9,20 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from api_routes import router as api_router
+from api_routes import init_db
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Tircha backend starting...")
-    # Initialize the API keys database
-    try:
-        from api_routes import init_db
-        init_db()
-        logger.info("API database initialized")
-    except Exception as e:
-        logger.error(f"DB init failed: {e}")
+    init_db()
+    logger.info("Database ready")
     yield
     logger.info("Shutting down.")
 
 app = FastAPI(
     title="Tircha API",
-    description="AI Blog Generation API + Affiliate Content Engine",
+    description="AI Blog Generation API",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -41,7 +39,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Core routes ─────────────────────────────────────────────
 @app.get("/")
 async def root():
     return {
@@ -55,22 +52,4 @@ async def root():
 async def health():
     return {"status": "ok", "site": "tircha.com"}
 
-# ── Mount all SaaS API routes ────────────────────────────────
-try:
-    from api_routes import (
-        generate_blog,
-        keyword_research,
-        razorpay_webhook,
-        create_test_key,
-        BlogRequest,
-        KeywordRequest
-    )
-
-    app.post("/api/blog/generate")(generate_blog)
-    app.post("/api/keywords/research")(keyword_research)
-    app.post("/webhooks/razorpay")(razorpay_webhook)
-    app.post("/admin/create-key")(create_test_key)
-
-    logger.info("SaaS API routes loaded successfully")
-except Exception as e:
-    logger.error(f"Failed to load API routes: {e}")
+app.include_router(api_router)
