@@ -6,3 +6,5 @@ cmds = ["pip install -r requirements.txt"]
 
 [start]
 cmd = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+
+# Force rebuild - timestamp: 2026-06-08T16:20:00Z
