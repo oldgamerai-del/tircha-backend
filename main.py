@@ -4,13 +4,21 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
 import logging
+import sys
+import traceback
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from api_routes import router as api_router
-from api_routes import init_db
+try:
+    from api_routes import router as api_router
+    from api_routes import init_db
+    logger.info("Successfully imported api_routes")
+except Exception as e:
+    logger.error(f"Failed to import api_routes: {e}")
+    logger.error(traceback.format_exc())
+    sys.exit(1)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,3 +65,4 @@ async def debug_routes():
     return {"routes": [route.path for route in app.routes]}
 
 app.include_router(api_router)
+logger.info(f"Registered {len(app.routes)} routes")
