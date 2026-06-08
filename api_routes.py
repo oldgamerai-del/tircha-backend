@@ -124,7 +124,7 @@ class KeywordRequest(BaseModel):
     limit: Optional[int] = 20
 
 
-@router.post("/api/blog/generate")
+@router.post("/blog/generate")
 async def generate_blog(
     request: BlogRequest,
     x_api_key: str = Header(..., alias="X-API-Key")
@@ -212,7 +212,7 @@ Write the full article in markdown now:"""
     }
 
 
-@router.post("/api/keywords/research")
+@router.post("/keywords/research")
 async def keyword_research(
     request: KeywordRequest,
     x_api_key: str = Header(..., alias="X-API-Key")
