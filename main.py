@@ -15,6 +15,7 @@ try:
     from api_routes import router as api_router
     from api_routes import init_db
     logger.info("Successfully imported api_routes")
+    logger.info(f"api_router routes: {[route.path for route in api_router.routes]}")
 except Exception as e:
     logger.error(f"Failed to import api_routes: {e}")
     logger.error(traceback.format_exc())
@@ -60,9 +61,11 @@ async def root():
 async def health():
     return {"status": "ok", "site": "tircha.com"}
 
+logger.info(f"App routes before include_router: {[route.path for route in app.routes]}")
+app.include_router(api_router)
+logger.info(f"App routes after include_router: {[route.path for route in app.routes]}")
+
 @app.get("/debug/routes")
 async def debug_routes():
-    return {"routes": [route.path for route in app.routes]}
-
-app.include_router(api_router)
-logger.info(f"Registered {len(app.routes)} routes")
+    routes = [{"path": route.path, "methods": route.methods if hasattr(route, "methods") else "N/A"} for route in app.routes]
+    return {"total_routes": len(routes), "routes": routes}
