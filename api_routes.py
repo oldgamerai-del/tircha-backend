@@ -1,14 +1,6 @@
-"""
-Tircha SaaS API - Secure Implementation
-- API keys stored in SQLite database
-- Rate limiting per key
-- No sensitive data exposed
-- Webhook validation from Lemon Squeezy
-"""
-
 import os
 import hashlib
-import hmac
+import hmac as hmac_lib
 import json
 import time
 import sqlite3
@@ -18,13 +10,12 @@ import re
 import urllib.parse
 import aiohttp
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException, Header, Request, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi import APIRouter, HTTPException, Header, Request
 from pydantic import BaseModel
 from typing import Optional
 
-# ─── Database setup ───────────────────────────────────────
+router = APIRouter()
+
 DB_PATH = os.getenv("DATABASE_PATH", "./tircha_api.db")
 
 def init_db():
@@ -53,46 +44,18 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
-
-# ─── Plans ─────────────────────────────────────────────────
 PLANS = {
-    "starter": 2499,
-    "pro":     3799,
-    "agency":  5899,
+    "starter": 10,
+    "pro":     50,
+    "agency":  200,
 }
 
-# ─── App ───────────────────────────────────────────────────
-app = FastAPI(
-    title="Tircha API",
-    description="AI Blog Generation API",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url=None,
-)
-
-# Only allow requests from known origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://tircha.com",
-        "https://www.tircha.com",
-        "http://localhost:3000",
-    ],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
-
-
-# ─── API Key validation ────────────────────────────────────
 def get_key_data(api_key: str) -> dict:
-    """Validate key and enforce rate limits"""
     if not api_key or not api_key.startswith("tircha_"):
         raise HTTPException(
             status_code=401,
-            detail="Invalid API key format. Get your key at tircha.com/pricing"
+            detail="Invalid API key. Get yours at tircha.com/pricing"
         )
-
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     row = conn.execute(
@@ -105,19 +68,17 @@ def get_key_data(api_key: str) -> dict:
             status_code=401,
             detail="API key not found. Subscribe at tircha.com/pricing"
         )
-
     if row["status"] != "active":
         conn.close()
         raise HTTPException(
             status_code=403,
-            detail="Your subscription is inactive. Renew at tircha.com/pricing"
+            detail="Subscription inactive. Renew at tircha.com/pricing"
         )
 
-    # Reset daily counter if new day
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if row["last_reset"] != today:
         conn.execute(
-            "UPDATE api_keys SET requests_today = 0, last_reset = ? WHERE api_key = ?",
+            "UPDATE api_keys SET requests_today=0, last_reset=? WHERE api_key=?",
             (today, api_key)
         )
         conn.commit()
@@ -130,7 +91,7 @@ def get_key_data(api_key: str) -> dict:
         conn.close()
         raise HTTPException(
             status_code=429,
-            detail=f"Daily limit of {limit} requests reached. Upgrade at tircha.com/pricing"
+            detail=f"Daily limit of {limit} reached. Upgrade at tircha.com/pricing"
         )
 
     data = dict(row)
@@ -139,22 +100,19 @@ def get_key_data(api_key: str) -> dict:
     conn.close()
     return data
 
-
 def increment_usage(api_key: str, endpoint: str, keyword: str = ""):
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
-        "UPDATE api_keys SET requests_today = requests_today + 1 WHERE api_key = ?",
+        "UPDATE api_keys SET requests_today=requests_today+1 WHERE api_key=?",
         (api_key,)
     )
     conn.execute(
-        "INSERT INTO usage_log (api_key, endpoint, keyword) VALUES (?, ?, ?)",
+        "INSERT INTO usage_log (api_key, endpoint, keyword) VALUES (?,?,?)",
         (api_key, endpoint, keyword)
     )
     conn.commit()
     conn.close()
 
-
-# ─── Request models ────────────────────────────────────────
 class BlogRequest(BaseModel):
     keyword: str
     niche: Optional[str] = "general"
@@ -166,26 +124,11 @@ class KeywordRequest(BaseModel):
     limit: Optional[int] = 20
 
 
-# ─── Routes ────────────────────────────────────────────────
-@app.get("/")
-async def root():
-    return {
-        "name": "Tircha API",
-        "docs": "/docs",
-        "pricing": "https://tircha.com/pricing"
-    }
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
-@app.post("/api/blog/generate")
+@router.post("/api/blog/generate")
 async def generate_blog(
     request: BlogRequest,
     x_api_key: str = Header(..., alias="X-API-Key")
 ):
-    """Generate a full SEO blog post. Requires active subscription."""
     key_data = get_key_data(x_api_key)
 
     if len(request.keyword.strip()) < 3:
@@ -199,8 +142,8 @@ async def generate_blog(
 Requirements:
 - {target_words}+ words minimum, do not stop early
 - Natural conversational tone
-- Short ## H2 headings (max 6 words each)
-- ### H3 subheadings where needed
+- Short ## H2 headings, max 6 words each
+- ### H3 subheadings where helpful
 - FAQ section at end with 3 questions
 - Niche: {request.niche}
 - Start with: "This post contains affiliate links."
@@ -269,15 +212,14 @@ Write the full article in markdown now:"""
     }
 
 
-@app.post("/api/keywords/research")
+@router.post("/api/keywords/research")
 async def keyword_research(
     request: KeywordRequest,
     x_api_key: str = Header(..., alias="X-API-Key")
 ):
-    """Get keyword ideas for any topic. Requires active subscription."""
     key_data = get_key_data(x_api_key)
-
     suggestions = []
+
     async with aiohttp.ClientSession() as session:
         for prefix in ["best", "top", "how to", "vs", ""]:
             query = f"{prefix} {request.seed}".strip()
@@ -321,24 +263,15 @@ async def keyword_research(
     }
 
 
-# ─── Razorpay Webhook ─────────────────────────────────
-@app.post("/webhooks/razorpay")
+@router.post("/webhooks/razorpay")
 async def razorpay_webhook(request: Request):
-    """
-    Razorpay sends events here for subscription changes.
-    Auto-creates API keys on payment, disables on cancellation.
-    """
     body = await request.body()
     signature = request.headers.get("X-Razorpay-Signature", "")
     secret = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 
-    # Verify webhook is genuinely from Razorpay
-    if secret:
-        import hmac as hmac_lib
+    if secret and signature:
         expected = hmac_lib.new(
-            secret.encode(),
-            body,
-            hashlib.sha256
+            secret.encode(), body, hashlib.sha256
         ).hexdigest()
         if not hmac_lib.compare_digest(expected, signature):
             raise HTTPException(status_code=401, detail="Invalid signature")
@@ -346,14 +279,10 @@ async def razorpay_webhook(request: Request):
     data = json.loads(body)
     event = data.get("event", "")
     payload = data.get("payload", {})
-
-    # Get subscription and customer details
     subscription = payload.get("subscription", {}).get("entity", {})
     email = subscription.get("email", "")
-
-    # Map Razorpay plan IDs to your plan names
-    # Get these plan IDs from Razorpay Dashboard → Subscriptions → Plans
     plan_id = subscription.get("plan_id", "")
+
     PLAN_MAP = {
         os.getenv("RAZORPAY_STARTER_PLAN_ID", ""): "starter",
         os.getenv("RAZORPAY_PRO_PLAN_ID", ""):     "pro",
@@ -365,60 +294,52 @@ async def razorpay_webhook(request: Request):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     if event in ("subscription.activated", "subscription.charged"):
-        # Check if key already exists for this email
         existing = conn.execute(
-            "SELECT api_key FROM api_keys WHERE email = ?", (email,)
+            "SELECT api_key FROM api_keys WHERE email=?", (email,)
         ).fetchone()
-
         if existing:
-            # Reactivate existing key
             conn.execute(
-                "UPDATE api_keys SET status = 'active', plan = ? WHERE email = ?",
+                "UPDATE api_keys SET status='active', plan=? WHERE email=?",
                 (plan, email)
             )
             api_key = existing[0]
         else:
-            # Create new API key
             api_key = "tircha_" + secrets.token_hex(24)
-            conn.execute("""
-                INSERT INTO api_keys (api_key, email, plan, status, last_reset)
-                VALUES (?, ?, ?, 'active', ?)
-            """, (api_key, email, plan, today))
-
+            conn.execute(
+                "INSERT INTO api_keys (api_key,email,plan,status,last_reset) VALUES (?,?,?,'active',?)",
+                (api_key, email, plan, today)
+            )
         conn.commit()
         conn.close()
-        print(f"ACTIVE: {email} → {plan} → {api_key}")
-        # TODO: Email the API key to the customer using Mailgun
+        print(f"SUBSCRIBER: {email} plan={plan} key={api_key}")
 
     elif event in ("subscription.cancelled", "subscription.completed", "subscription.halted"):
         conn.execute(
-            "UPDATE api_keys SET status = 'inactive' WHERE email = ?", (email,)
+            "UPDATE api_keys SET status='inactive' WHERE email=?", (email,)
         )
         conn.commit()
         conn.close()
-        print(f"CANCELLED: {email}")
 
     return {"received": True}
 
 
-# ─── Admin only — create manual test key ──────────────────
-@app.post("/admin/create-key")
+@router.post("/admin/create-key")
 async def create_test_key(
     email: str,
     plan: str = "starter",
-    admin_secret: str = Header(..., alias="X-Admin-Secret")
+    x_admin_secret: str = Header(..., alias="X-Admin-Secret")
 ):
-    """Create API key manually. Only you can use this."""
-    if admin_secret != os.getenv("ADMIN_SECRET", ""):
+    admin_secret = os.getenv("ADMIN_SECRET", "")
+    if not admin_secret or x_admin_secret != admin_secret:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     api_key = "tircha_" + secrets.token_hex(24)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        INSERT INTO api_keys (api_key, email, plan, status, last_reset)
-        VALUES (?, ?, ?, 'active', ?)
-    """, (api_key, email, plan, today))
+    conn.execute(
+        "INSERT INTO api_keys (api_key,email,plan,status,last_reset) VALUES (?,?,?,'active',?)",
+        (api_key, email, plan, today)
+    )
     conn.commit()
     conn.close()
     return {"api_key": api_key, "email": email, "plan": plan}
