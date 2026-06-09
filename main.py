@@ -52,5 +52,4 @@ async def root():
 async def health():
     return {"status": "ok", "site": "tircha.com"}
 
-# Include router with /api prefix so routes become /api/blog/generate, /api/keywords/research, etc.
-app.include_router(api_router, prefix="/api")
+app.include_router(api_router)
