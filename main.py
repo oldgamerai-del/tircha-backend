@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import os, logging, sqlite3, secrets, hashlib, hmac as hmac_lib
 import json, re, asyncio, urllib.parse, aiohttp
 from datetime import datetime, timezone
-
+ import base64
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -304,6 +304,82 @@ async def create_test_key(
         "INSERT OR REPLACE INTO api_keys (api_key,email,plan,status,last_reset) VALUES (?,?,?,'active',?)",
         (api_key, email, plan, today)
     )
+
+   
+
+class SubscribeRequest(BaseModel):
+    email: str
+    plan: str  # starter / pro / agency
+
+@app.post("/api/subscribe")
+async def create_subscription(request: SubscribeRequest):
+    """
+    Creates a unique Razorpay subscription for each customer.
+    Returns a checkout URL specific to that customer.
+    """
+    plan_map = {
+        "starter": os.getenv("RAZORPAY_STARTER_PLAN_ID", ""),
+        "pro":     os.getenv("RAZORPAY_PRO_PLAN_ID", ""),
+        "agency":  os.getenv("RAZORPAY_AGENCY_PLAN_ID", ""),
+    }
+
+    plan_id = plan_map.get(request.plan, "")
+    if not plan_id:
+        raise HTTPException(status_code=400, detail=f"Invalid plan: {request.plan}")
+
+    key_id     = os.getenv("RAZORPAY_KEY_ID", "")
+    key_secret = os.getenv("RAZORPAY_KEY_SECRET", "")
+
+    if not key_id or not key_secret:
+        raise HTTPException(status_code=500, detail="Payment not configured")
+
+    # Base64 encode credentials for Basic Auth
+    credentials = base64.b64encode(f"{key_id}:{key_secret}".encode()).decode()
+
+    payload = {
+        "plan_id": plan_id,
+        "total_count": 120,       # 10 years of monthly billing
+        "quantity": 1,
+        "customer_notify": 1,
+        "callback_url": "https://tircha.com/payment/success",
+        "callback_method": "get",
+        "notes": {
+            "email": request.email,
+            "plan": request.plan
+        }
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://api.razorpay.com/v1/subscriptions",
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/json"
+            },
+            json=payload,
+            timeout=aiohttp.ClientTimeout(total=15)
+        ) as resp:
+            data = await resp.json()
+
+            if resp.status != 200:
+                logger.error(f"Razorpay subscription creation failed: {data}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Failed to create subscription. Please try again."
+                )
+
+            checkout_url = data.get("short_url", "")
+            subscription_id = data.get("id", "")
+
+            logger.info(f"Subscription created: {subscription_id} for {request.email} on {request.plan}")
+
+            return {
+                "success": True,
+                "checkout_url": checkout_url,
+                "subscription_id": subscription_id,
+                "plan": request.plan,
+                "email": request.email
+            }
     conn.commit()
     conn.close()
     return {"api_key": api_key, "email": email, "plan": plan}
