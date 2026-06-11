@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import os, logging, sqlite3, secrets, hashlib, hmac as hmac_lib
 import json, re, asyncio, urllib.parse, aiohttp
 from datetime import datetime, timezone
- import base64
+import base64
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -287,26 +287,6 @@ async def razorpay_webhook(request: Request):
 
     return {"received": True}
 
-@app.post("/admin/create-key")
-async def create_test_key(
-    email: str,
-    plan: str = "starter",
-    x_admin_secret: str = Header(..., alias="X-Admin-Secret")
-):
-    admin_secret = os.getenv("ADMIN_SECRET", "")
-    if not admin_secret or x_admin_secret != admin_secret:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-    api_key = "tircha_" + secrets.token_hex(24)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT OR REPLACE INTO api_keys (api_key,email,plan,status,last_reset) VALUES (?,?,?,'active',?)",
-        (api_key, email, plan, today)
-    )
-
-   
-
 class SubscribeRequest(BaseModel):
     email: str
     plan: str  # starter / pro / agency
@@ -380,6 +360,26 @@ async def create_subscription(request: SubscribeRequest):
                 "plan": request.plan,
                 "email": request.email
             }
+
+
+@app.post("/admin/create-key")
+async def create_test_key(
+    email: str,
+    plan: str = "starter",
+    x_admin_secret: str = Header(..., alias="X-Admin-Secret")
+):
+    admin_secret = os.getenv("ADMIN_SECRET", "")
+    if not admin_secret or x_admin_secret != admin_secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    api_key = "tircha_" + secrets.token_hex(24)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR REPLACE INTO api_keys (api_key,email,plan,status,last_reset) VALUES (?,?,?,'active',?)",
+        (api_key, email, plan, today)
+    )
     conn.commit()
     conn.close()
     return {"api_key": api_key, "email": email, "plan": plan}
+   
