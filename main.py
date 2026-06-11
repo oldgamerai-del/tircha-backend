@@ -321,8 +321,6 @@ async def create_subscription(request: SubscribeRequest):
         "total_count": 120,       # 10 years of monthly billing
         "quantity": 1,
         "customer_notify": 1,
-        "callback_url": "https://tircha.com/payment/success",
-        "callback_method": "get",
         "notes": {
             "email": request.email,
             "plan": request.plan
